@@ -1,0 +1,568 @@
+---
+title: "Practice Code: Day 2"
+author:
+  name: "Constantin Manuel Bosancianu"
+  orcid: 0000-0001-7950-9798
+  email: bosancianu@icloud.com
+date: "November 2, 2015"
+execute:
+  eval: true
+  echo: true
+  warning: false
+  error: false
+format:
+  html:
+    toc: true
+    code-fold: true
+    toc-location: left
+    theme: lux
+    number-sections: true
+    reference-location: margin
+    embed-resources: true
+---
+
+# Introduction
+
+**Warning**: the code chunk below will install packages on your system (if these are not already installed).
+
+```{r load-packages}
+library(pacman)
+p_load(tidyverse, survival, knitr, ggthemes, simPH, lmtest)
+```
+
+```{r read-data-1}
+df_hmohiv <- readRDS(file = "../02-data/02-hmohiv.rds")
+```
+
+Conduct a quick examination of the data.
+
+```{r examine-data}
+df_hmohiv |>
+  glimpse()
+```
+
+Finally, we include a pair of helpful functions to create plots for our survival analyses using `ggplot2`.^[The functions were created by Ramon Saccilotto, at the Basel Institute for Clinical Epidemiology and Biostatistics.]
+
+```{r helpful-functions}
+createSurvivalFrame <- function(f.survfit){
+# initialise frame variable
+f.frame <- NULL
+# check if more then one strata
+if(length(names(f.survfit$strata)) == 0){
+# create data.frame with data from survfit
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower)
+# create first two rows (start at 1)
+f.start <- data.frame(time=c(0, f.frame$time[1]), n.risk=c(f.survfit$n, f.survfit$n), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1))
+# add first row to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start)
+}
+else {
+# create vector for strata identification
+f.strata <- NULL
+for(f.i in 1:length(f.survfit$strata)){
+# add vector for one strata according to number of rows of strata
+f.strata <- c(f.strata, rep(names(f.survfit$strata)[f.i], f.survfit$strata[f.i]))
+}
+# create data.frame with data from survfit (create column for strata)
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower, strata=factor(f.strata))
+# remove temporary data
+rm(f.strata)
+# create first two rows (start at 1) for each strata
+for(f.i in 1:length(f.survfit$strata)){
+# take only subset for this strata from data
+f.subset <- subset(f.frame, strata==names(f.survfit$strata)[f.i])
+# create first two rows (time: 0, time of first event)
+f.start <- data.frame(time=c(0, f.subset$time[1]), n.risk=rep(f.survfit[f.i]$n, 2), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1), strata=rep(names(f.survfit$strata)[f.i],
+2))
+# add first two rows to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start, f.subset)
+}
+# reorder data
+f.frame <- f.frame[order(f.frame$strata, f.frame$time), ]
+# rename row.names
+rownames(f.frame) <- NULL
+}
+# return frame
+return(f.frame)
+}
+
+
+# define custom function to draw kaplan-meier curve with ggplot
+qplot_survival <- function(f.frame, f.CI="default", f.shape=3){
+# use different plotting commands dependig whether or not strata's are given
+if("strata" %in% names(f.frame) == FALSE){
+# confidence intervals are drawn if not specified otherwise
+if(f.CI=="default" | f.CI==TRUE ){
+# create plot with 4 layers (first 3 layers only events, last layer only censored)
+# hint: censoring data for multiple censoring events at timepoint are overplotted
+# (unlike in plot.survfit in survival package)
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv") + geom_step(aes(x=time,
+y=upper), directions="hv", linetype=2) + geom_step(aes(x=time,y=lower), direction="hv", linetype=2) +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+else {
+# create plot without confidence intervals
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv") +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+}
+else {
+if(f.CI=="default" | f.CI==FALSE){
+# without CI
+ggplot(data=f.frame, aes(group=strata, colour=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv") + geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+else {
+# with CI (hint: use alpha for CI)
+ggplot(data=f.frame, aes(colour=strata, group=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv") + geom_step(aes(x=time, y=upper), directions="hv", linetype=2, alpha=0.5) +
+geom_step(aes(x=time,y=lower), direction="hv", linetype=2, alpha=0.5) +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+}
+}
+```
+
+Before getting started, change the name of the outcome, so as to clarify what it encodes.
+
+```{r clean-data-1}
+df_hmohiv <- df_hmohiv |>
+  rename(death = 5)
+```
+
+# Cox proportional hazards model
+
+`coxph()` is the function which implements the Cox PH model It uses a standard `Surv` object as the dependent variable. The rest of the formula looks like standard OLS (`~IV1 + IV2 + ...`).
+
+```{r cox-model-1}
+model.1 <- coxph(Surv(time, death) ~ drug + age,
+                 data = df_hmohiv)
+summary(model.1)
+```
+
+Based on the model output, we can obtain a variety of quantities of interest.
+
+```{r qoi-1}
+predict(model.1, type = "risk", se.fit = TRUE) # hazard ratio
+```
+
+```{r qoi-2}
+predict(model.1, type = "lp", se.fit = TRUE) # linear predictor
+```
+
+```{r qoi-3}
+predict(model.1, type = "expected", se.fit = TRUE) # expected number of events
+```
+
+## Plotting
+
+To plot these predictions, we can use the functions we used yesterday as well. `survfit()` can be used to create survival curves from the model.
+
+Obtain survival curves for a drug user aged 20.
+
+```{r plot-01}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+df_test <- survfit(model.1,
+                   newdata = data.frame(drug = 1, age = 20))
+ObjSurv1 <- createSurvivalFrame(df_test)
+
+qplot_survival(ObjSurv1) +
+  labs(x = "Time",
+       y = "Survival") +
+    theme_clean()
+rm(df_test, ObjSurv1)
+```
+
+Compare with the survival curve for a drug user aged 40.
+
+```{r plot-02}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+df_test <- survfit(model.1,
+                   newdata = data.frame(drug = 1, age = 40))
+ObjSurv1 <- createSurvivalFrame(df_test)
+
+qplot_survival(ObjSurv1) +
+  labs(x = "Time",
+       y = "Survival") +
+    theme_clean()
+rm(df_test, ObjSurv1)
+```
+
+You can see from the comparison of the graphs that the younger person infected with HIV has better survival prospects.
+
+## Predictions
+
+For predictions based on simulations you can use the `simPH` package. Before estimating the model, though, we need to center age.^[We need this because all hazards are compared to a reference age, which is 0. So we need to give age a meaningful 0 point.]
+
+```{r clean-data-2}
+df_hmohiv <- df_hmohiv |>
+  mutate(mean_age = age - mean(age, na.rm = TRUE))
+```
+
+```{r cox-model-2}
+model.2 <- coxph(Surv(time, death) ~ drug + mean_age,
+                 data = df_hmohiv)
+```
+
+The function which does the simulations is called `coxsimLinear()`. It needs from us the estimated model, which variable to plot, and the range of this variable for which predictions should be obtained. `simGG()`, from the same package, then plots the predictions.
+
+```{r preds-1}
+sim.2 <- coxsimLinear(model.2,
+                      b = "mean_age",
+                      Xj = seq(-10, 8, by = 0.25),
+                      nsim = 250)
+```
+
+The smaller the `by =` interval, the smoother the graph.
+
+```{r plot-03}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+graph1 <- simGG(sim.2,
+                xlab = "Mean age",
+                type = "lines",
+                method = "loess")
+graph1 +
+  ggtitle("First prediction graph with simPH")
+rm(graph1)
+```
+
+We can also obtain predictions for a dichotomous variable in our specification. Here we would have to select `method = "lm"`, given that it's a dichotomous predictor.
+
+```{r preds-2}
+sim.3 <- coxsimLinear(model.2,
+                      b = "drug",
+                      Xj = 0:1,
+                      nsim = 250)
+```
+
+We generate a new plot, with a proper legend this time.
+
+```{r plot-04}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+graph2 <- simGG(sim.3,
+                xlab = "Drug use",
+                type = "lines",
+                method = "lm")
+
+graph2 +
+  scale_x_continuous(limits = c(0, 1),
+                     breaks = c(0, 1),
+                     labels = c("No drug use", "Drug use"))
+
+rm(model.1, model.2, sim.1, sim.2, graph.2, sim.3)
+```
+
+# Checking PH assumption
+
+To check whether the proportional hazards (PH) assumption is valid, we need to get log-log survival curves.
+
+```{r plot-05}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+model.1 <- survfit(Surv(time, death) ~ drug,
+                   data = df_hmohiv)
+
+plot(model.1,
+     fun = "cloglog",
+     lty = c("solid", "dashed"),
+     col = c("red", "blue"),
+     xlab = "Time in log scale",
+     ylab = "log-log survival")
+```
+
+It seems we're OK in terms of the PH assumption.
+
+We can do this for continuous predictors as well, as long as we recode them into a fixed number of groups. For the sake of producing a manageable graph, these groups would usually be between 2 and 4.
+
+```{r clean-data-3}
+vec_quant_age <- quantile(df_hmohiv$age,
+                          c(0.333, 0.666))
+
+df_hmohiv <- df_hmohiv |>
+  mutate(age_cat = case_when(age < vec_quant_age[1] ~ 0,
+                             age >= vec_quant_age[1] &
+                              age < vec_quant_age[2] ~ 1,
+                             age >= vec_quant_age[2] ~ 2))
+rm(vec_quant_age)
+```
+
+Run the `survfit()` function again, to get the survival curves.
+
+```{r plot-06}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+model.1 <- survfit(Surv(time, death) ~ age_cat,
+                   data = df_hmohiv)
+plot(model.1,
+     fun = "cloglog",
+     lty = c("solid", "dashed", "dotted"),
+     col = c("red", "blue", "green"),
+     xlab = "Time in log scale",
+     ylab = "log-log survival")
+```
+
+## GOF approach
+
+Fit a Cox model, and try to see the tests for each parameter. This is done with the `cox.zph()` function.^[The `global = ` argument does a global $\chi^2$ test in addition to one for each variable.]
+
+```{r ph-assumption-gof-1}
+model.1 <- coxph(Surv(time, death) ~ drug + age,
+                 data = df_hmohiv)
+
+cox.zph(model.1,
+        transform = "km",
+        global = FALSE)
+```
+
+## Time-varying approach
+
+This approach is based on running an interaction with time, to see whether the assumption is valid with respect to the drug use indicator.
+
+This should be done through the `tt = ` approach presented here. If we just interact drug with time, the model gives you convergence errors, because `time` also appears as a DV, technically.
+
+```{r ph-assumption-time-varying}
+model.2 <- coxph(Surv(time, death) ~ drug + age + tt(drug),
+                 data = df_hmohiv,
+                 tt = function(x, t, ...) x * t)
+
+summary(model.2)
+
+rm(model.2, model.1, df_hmohiv)
+```
+
+# Advanced specifications
+
+We start with a new data set for this section.
+
+```{r read-data-2}
+df_uis <- read.table("../02-data/03-uissurv.dat",
+                     quote = "\"",
+                     comment.char = "")
+```
+
+A bit of recoding is needed to correct for improperly reading the data. Dots need to be replaced with `NA`s, and variables need to be coerced to be considered numeric.
+
+```{r clean-data-4}
+df_uis <- df_uis |>
+  rename(id = 1,
+         age = 2,
+         becktota = 3,
+         hercoc = 4,
+         ivhx = 5,
+         ndrugtx = 6,
+         race = 7,
+         treat = 8,
+         site = 9,
+         lot = 10,
+         time = 11,
+         censor = 12) |>
+  mutate(becktota = if_else(becktota == ".", NA_character_, becktota),
+         hercoc = if_else(hercoc == ".", NA_character_, hercoc),
+         ivhx = if_else(ivhx == ".", NA_character_, ivhx),
+         race = if_else(race == ".", NA_character_, race),
+         age = if_else(age == ".", NA_character_, age)) |>
+  mutate_at(.vars = vars(becktota, hercoc, ivhx, race, age),
+            .funs = as.numeric)
+```
+
+## Stratified Cox model
+
+```{r cox-model-3}
+model.3 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat +
+                  site + lot,
+                 data = df_uis,
+                 na.action = na.omit)
+
+summary(model.3)
+```
+
+Something isn't exactly right there.
+
+```{r ph-assumption-gof-2}
+cox.zph(model.3,
+        transform = "km",
+        global = FALSE)
+```
+
+To overcome this we need to recode `lot` into a few categories.
+
+```{r clean-data-5}
+vec_quant_lot <- quantile(df_uis$lot,
+                          c(0.333, 0.666))
+
+df_uis <- df_uis |>
+  mutate(lot_cat = case_when(lot < vec_quant_lot[1] ~ 0,
+                             lot >= vec_quant_lot[1] &
+                              lot < vec_quant_lot[2] ~ 1,
+                             lot >= vec_quant_lot[2] ~ 2))
+rm(vec_quant_lot)
+```
+
+Run the model again, this time stratifying on the recoded variable.
+
+```{r cox-model-4}
+model.4 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat + site +
+                  strata(lot_cat),
+                data = df_uis,
+                na.action = na.omit)
+summary(model.4)
+```
+
+Plot the survival curves for the three groups.^[Run the following lines at once for all the elements to appear (legend and axes).]
+
+```{r plot-07}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+plot(survfit(model.4),
+     lty = c("solid", "dashed", "dotted"),
+     col = c("red", "blue", "green"))
+legend(900, .9, 
+       c("low", "medium", "high"),
+       lty = 1:3,
+       col = c("red", "blue", "green"),
+       cex = 0.8, border = "black",
+       text.col = "black", bg = "transparent")
+mtext("Time", side = 1, col = "black", line = 2)
+mtext("Survival", side = 2, col = "black", line = 2)
+```
+
+```{r plot-08}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+plot(survfit(model.3),
+     col = "red")
+rm(model.3, model.4)
+```
+
+This following section illustrates how we might check if the coefficients vary between strata. I've recoded `lot` into two groups now, to make things more manageable.
+
+```{r clean-data-6}
+vec_quant_lot <- quantile(df_uis$lot,
+                          0.5)
+
+df_uis <- df_uis |>
+  mutate(lot_cat = if_else(lot < vec_quant_lot[1], 0, 1))
+rm(vec_quant_lot)
+```
+
+Now we run a specification with stratification.
+
+```{r cox-model-5}
+model.4.1 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat + site +
+                    strata(lot_cat),
+                   data = df_uis,
+                   na.action = na.omit)
+```
+
+Now run the specification with interactions. Every IV can be interacted with the new stratification variable, or only some (depending on the theory).
+
+```{r cox-model-6}
+model.4.2 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat + site +
+                      lot_cat + age * lot_cat + becktota * lot_cat +
+                      ivhx * lot_cat + treat * lot_cat + site * lot_cat,
+                   data = df_uis,
+                   na.action = na.omit)
+```
+
+Examine the results for model 1.
+
+```{r results-m1}
+round(summary(model.4.1)$coefficients,
+      digits = 3)
+```
+
+Examine the results for model 2.
+
+```{r results-m2}
+round(summary(model.4.2)$coefficients,
+      digits = 3)
+```
+
+Check if the second model fits the data better.
+
+```{r gof-check}
+lrtest(model.4.1, model.4.2)
+rm(model.4.1, model.4.2)
+```
+
+It seems it does, which means the coefficients are not the same between strata. This model wouldn't work very well here.
+
+## Extended Cox model
+
+For this section we'll use the `heart` data, which is available in the `survival` package.
+
+```{r read-data-3}
+data(heart)
+
+heart |>
+  glimpse()
+```
+
+We first run a basic Cox PH model; we then specify start and stop times. There's no need to cluster observations, since the software knows what observation to select for inclusion in the likelihood function.
+
+```{r cox-model-7}
+model.5 <- coxph(Surv(start, stop, event) ~ transplant + surgery +
+                     age + year,
+                 data = heart)
+summary(model.5)
+```
+
+Plot survival curves for a 28 year-old respondent, with no transplant.^[In the data set, `age` is already centered around the value of 48 years, i.e. a person that is 38 years-old has a value of -10 on `age`.]
+
+```{r plot-09}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+plot(survfit(model.5,
+             newdata = data.frame(transplant = 0,
+                                  age = -20,
+                                  surgery = 0,
+                                  year = 0)),
+     xlab = "Time",
+     ylab = "Survival")
+```
+
+Plot survival curves for a 58 year-old respondent, with no transplant.
+
+```{r plot-10}
+#| fig-height: 4
+#| fig-width: 7
+#| fig-align: center
+
+plot(survfit(model.5,
+             newdata = data.frame(transplant = 0,
+                                  age = 10,
+                                  surgery = 0,
+                                  year = 0)),
+     xlab = "Time",
+     ylab = "Survival")
+```

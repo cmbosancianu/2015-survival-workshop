@@ -1,0 +1,318 @@
+---
+title: "Practice Code: Day 1"
+author:
+  name: "Constantin Manuel Bosancianu"
+  orcid: 0000-0001-7950-9798
+  email: bosancianu@icloud.com
+date: "November 1, 2015"
+execute:
+  eval: true
+  echo: true
+  warning: false
+  error: false
+format:
+  html:
+    toc: true
+    code-fold: true
+    toc-location: left
+    theme: lux
+    number-sections: true
+    reference-location: margin
+    embed-resources: true
+---
+
+# Introduction
+
+**Warning**: the code chunk below will install packages on your system (if these are not already installed).
+
+```{r load-packages}
+library(pacman)
+p_load(tidyverse, survival, knitr, ggthemes)
+```
+
+We also load the Reinhart-Rogoff data.
+
+```{r read-data}
+load("../02-data/01-RR-final.Rdata")
+```
+
+Finally, we include a pair of helpful functions to create plots for our survival analyses using `ggplot2`.^[The functions were created by Ramon Saccilotto, at the Basel Institute for Clinical Epidemiology and Biostatistics.]
+
+```{r helpful-functions}
+createSurvivalFrame <- function(f.survfit){
+# initialise frame variable
+f.frame <- NULL
+# check if more then one strata
+if(length(names(f.survfit$strata)) == 0){
+# create data.frame with data from survfit
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower)
+# create first two rows (start at 1)
+f.start <- data.frame(time=c(0, f.frame$time[1]), n.risk=c(f.survfit$n, f.survfit$n), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1))
+# add first row to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start)
+}
+else {
+# create vector for strata identification
+f.strata <- NULL
+for(f.i in 1:length(f.survfit$strata)){
+# add vector for one strata according to number of rows of strata
+f.strata <- c(f.strata, rep(names(f.survfit$strata)[f.i], f.survfit$strata[f.i]))
+}
+# create data.frame with data from survfit (create column for strata)
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower, strata=factor(f.strata))
+# remove temporary data
+rm(f.strata)
+# create first two rows (start at 1) for each strata
+for(f.i in 1:length(f.survfit$strata)){
+# take only subset for this strata from data
+f.subset <- subset(f.frame, strata==names(f.survfit$strata)[f.i])
+# create first two rows (time: 0, time of first event)
+f.start <- data.frame(time=c(0, f.subset$time[1]), n.risk=rep(f.survfit[f.i]$n, 2), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1), strata=rep(names(f.survfit$strata)[f.i],
+2))
+# add first two rows to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start, f.subset)
+}
+# reorder data
+f.frame <- f.frame[order(f.frame$strata, f.frame$time), ]
+# rename row.names
+rownames(f.frame) <- NULL
+}
+# return frame
+return(f.frame)
+}
+
+
+# define custom function to draw kaplan-meier curve with ggplot
+qplot_survival <- function(f.frame, f.CI="default", f.shape=3){
+# use different plotting commands dependig whether or not strata's are given
+if("strata" %in% names(f.frame) == FALSE){
+# confidence intervals are drawn if not specified otherwise
+if(f.CI=="default" | f.CI==TRUE ){
+# create plot with 4 layers (first 3 layers only events, last layer only censored)
+# hint: censoring data for multiple censoring events at timepoint are overplotted
+# (unlike in plot.survfit in survival package)
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv") + geom_step(aes(x=time,
+y=upper), directions="hv", linetype=2) + geom_step(aes(x=time,y=lower), direction="hv", linetype=2) +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+else {
+# create plot without confidence intervals
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv") +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+}
+else {
+if(f.CI=="default" | f.CI==FALSE){
+# without CI
+ggplot(data=f.frame, aes(group=strata, colour=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv") + geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+else {
+# with CI (hint: use alpha for CI)
+ggplot(data=f.frame, aes(colour=strata, group=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv") + geom_step(aes(x=time, y=upper), directions="hv", linetype=2, alpha=0.5) +
+geom_step(aes(x=time,y=lower), direction="hv", linetype=2, alpha=0.5) +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape)
+}
+}
+}
+```
+
+# Data cleaning
+
+We start with a bit of data cleaning and subsetting, based on the following rules:
+
+1. We subset the data to just the 1980-2000 period
+2. We construct 7 distinct time periods in the data, and aggregate it at the level of period;
+3. We further dichotomize the indicator for sovereign debt crises: any country and period with at least 1 sovereign debt crisis is coded as **1**
+4. The periods immediately following a period with a sovereign debt crisis are coded as **0**
+
+```{r clean-data-1}
+df_rr <- DFrr |>
+  filter(year >= 1980 & year <= 2000) |>
+  mutate(period = case_when(year >= 1980 & year <= 1982 ~ 1,
+                            year >= 1983 & year <= 1985 ~ 2,
+                            year >= 1986 & year <= 1988 ~ 3,
+                            year >= 1989 & year <= 1991 ~ 4,
+                            year >= 1992 & year <= 1994 ~ 5,
+                            year >= 1995 & year <= 1997 ~ 6,
+                            year >= 1998 & year <= 2000 ~ 7)) |>
+  filter(country %in% c("Algeria", "Argentina", "Australia", "Brazil", "Canada",
+                        "Chile", "China", "Ecuador", "El Salvador", "Ghana",
+                        "Honduras", "India", "Indonesia", "Kenya", "Malaysia",
+                        "Mexico", "Nicaragua", "Nigeria", "Panama", "Peru",
+                        "Portugal", "Russia", "Sri Lanka", "Thailand",
+                        "Turkey", "Venezuela", "Zimbabwe", "Philippines",
+                        "Myanmar", "Bolivia", "Angola", "France", "Ireland",
+                        "Greece", "Paraguay"))
+
+df_temp <- df_rr |>
+  group_by(country, period) |>
+  summarise(cr_debt = sum(sovdebt1)) |>
+  ungroup() |>
+  mutate(cr_debt = if_else(cr_debt >= 2, 1, cr_debt),
+         cr_debt = if_else(country == "Angola" & period >= 6, 0, cr_debt),
+         cr_debt = if_else(country == "Argentina" & period >= 2, 0, cr_debt),
+         cr_debt = if_else(country == "Bolivia" & period >= 2, 0, cr_debt),
+         cr_debt = if_else(country == "Brazil" & period >= 4, 0, cr_debt),
+         cr_debt = if_else(country == "El Salvador" & period >= 2, 0, cr_debt),
+         cr_debt = if_else(country == "Indonesia" & period >= 7, 0, cr_debt),
+         cr_debt = if_else(country == "Nicaragua" & period >= 3, 0, cr_debt),
+         cr_debt = if_else(country == "Panama" & period >= 4, 0, cr_debt),
+         cr_debt = if_else(country == "Peru" & period >= 3, 0, cr_debt),
+         cr_debt = if_else(country == "Venezuela" & period >= 7, 0, cr_debt))
+```
+
+# Examine data
+
+How many sovereign debt crises take place in each period?
+
+```{r examine-data-1}
+#| output: asis
+
+df_temp |>
+  group_by(period) |>
+  summarise(cr_debt = sum(cr_debt)) |>
+  rename(`Period of time` = 1,
+         `Number of debt crises` = 2) |>
+  kable(caption = "Summary of sovereign debt crises (1980-2000)")
+rm(df_temp)
+```
+
+What is the survival time?
+
+
+```{r examine-data-2}
+#| fig-align: center
+#| fig-height: 4
+#| fig-width: 6
+
+df_agg <- df_rr |>
+  dplyr::select(country, year, contin, sovdebt1) |>
+  group_by(country) |>
+  mutate(time = str_locate(paste(sovdebt1, collapse = ""), "1")[1]) |>
+  ungroup()
+
+ggplot(df_agg, aes(x = time)) +
+  geom_bar(fill = "black") +
+  labs(x = "Survival time (in years)",
+       y = "Number of countries") +
+  theme_clean()
+```
+
+For each country, we also construct a time variable, and select the continent variable. We further create an indicator variable for whether the case is censored or not (0 means not censored, i.e. the country had a debt crisis), as well as a dummy indicator for a country located in South America.
+
+If time is missing, that means the country is censored (did not have a crisis, 
+e.g. Australia)
+
+```{r clean-data-2}
+df_fin <- df_agg |>
+  group_by(country) |>
+  summarise(time = time[1] - 1,
+            contin = contin[1]) |>
+  mutate(event = if_else(is.na(time), 0, 1),
+         SouthA = if_else(contin == "South America", 1, 0),
+         time = if_else(is.na(time), 19, time))
+```
+
+How the final data set looks.
+
+```{r examine-data-3}
+df_fin |> glimpse()
+```
+
+# Initial survival analysis
+
+## Basic
+
+We first have to define a `survival` object, which is then used by the `survival` package's functions.
+
+The `type=` argument asks what kind of censoring we have in our data, with 6 options. `right` is the default, but I added it here nonetheless. Other common options are `left` or `interval`.^[`Surv()` technically creates an object which will be used as a DV by the multivariate procedures we will go through tomorrow.]
+
+Unless specifying variables, the `~ 1` part is the default. It technically means that the entire sample is used for 1 Kaplan-Meier curve.
+
+Right censored observations are marked with a **+** in the output.
+
+```{r survival-analysis-01}
+Surv(df_fin$time, df_fin$event, type = "right")
+ObjSurv1 <- survfit(Surv(time, event) ~ 1, data = df_fin)
+```
+
+Display survival probabilities for each time point.
+
+```{r survival-analysis-02}
+round(summary(ObjSurv1)$surv, digits = 2)
+```
+
+Display upper confidence bound for the survival estimates.^[This code can easily be adapted to get the lower confidence bound as well.]
+
+```{r survival-analysis-03}
+round(summary(ObjSurv1)$upper, digits = 2)
+```
+
+We can also easily plot survival estimates.
+
+```{r survival-analysis-04}
+#| fig-align: center
+#| fig-height: 4
+#| fig-width: 6
+
+plot(ObjSurv1,
+     xlab = "Time",
+     ylab = "Survival probability")
+```
+
+## Separate groups
+
+We move on to computing separate curves for two groups. The formula you see below can accomodate numberous situations, involving multiple group membership indicators.^[The defaults with more than two groups is not to plot CIs. Here, though, I've asked it to plot them, mainly for didactic purposes (it makes less sense here, when the sample is the actual population).]
+
+```{r survival-analysis-05}
+ObjSurv2 <- survfit(Surv(time, event) ~ SouthA,
+                    data = df_fin)
+
+plot(ObjSurv2,
+     xlab = "Time",
+     ylab = "Survival probability",
+     conf.int = TRUE)
+```
+
+We can get nicer plots by using the custom functions defined at the beginning of the script.
+
+```{r survival-analysis-06}
+#| fig-align: center
+#| fig-height: 4
+#| fig-width: 6
+
+# Apply the functions to this example
+ObjSurvMod2 <- createSurvivalFrame(ObjSurv2)
+
+qplot_survival(ObjSurvMod2, f.CI = TRUE) +
+  labs(x = "Time",
+       y = "Survival") +
+  theme_clean()
+```
+
+# Significance tests
+
+Apply the log-rank test with the `survdiff()` function; this checks whether there is a significant difference between the two curves.
+
+```{r sig-test-1}
+survdiff(Surv(time, event) ~ SouthA,
+         data = df_fin)
+```
+
+We can also apply the Peto type of log-rank test, via the same function.
+
+```{r sig-test-2}
+survdiff(Surv(time, event) ~ SouthA,
+         data = df_fin,
+         rho = 1)
+```

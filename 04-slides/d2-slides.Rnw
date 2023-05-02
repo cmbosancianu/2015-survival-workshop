@@ -1,0 +1,1366 @@
+\documentclass[12pt,english,pdf,xcolor=dvipsnames,aspectratio=169,handout]{beamer}
+\usepackage{etex}
+\usetheme{default}
+\beamertemplatenavigationsymbolsempty
+\definecolor{fore}{RGB}{249,242,215}
+\definecolor{back}{RGB}{51,51,51}
+\definecolor{title}{RGB}{255,0,90}
+\setbeamercolor{titlelike}{fg=title}
+\setbeamercolor{normal text}{fg=fore,bg=back}
+\setbeamertemplate{footline}[page number]
+\usepackage{mathpazo}
+\usepackage{amsmath}
+\usepackage{multirow}
+\renewcommand{\familydefault}{\rmdefault}
+\usepackage[T1]{fontenc}
+\usepackage{inputenc}
+\usepackage{parskip}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+\usepackage{hyperref}
+\hypersetup{pdfauthor={Constantin Manuel Bosancianu},
+pdftitle={Event History Analysis in R},
+pdfsubject={Introduction to event history analysis},
+pdfkeywords={Heidelberg, survival analysis, day 2, slides}}
+\usepackage{babel}
+\usepackage{graphicx}
+\usepackage[makeroom]{cancel}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.10}
+\usepgfplotslibrary{fillbetween}
+\usepackage{palatino}
+% Defines a checkmark
+\def\checkmark{\tikz\fill[scale=0.4,color=title](0,.35) -- (.25,0) -- (1,.7) -- (.25,.15) -- cycle;}
+\setbeamertemplate{itemize items}{\checkmark}
+% For table captions in Beamer
+\usepackage{caption}
+\captionsetup[figure]{labelfont={color=fore}}
+\captionsetup[table]{labelfont={color=fore}}
+\usepackage{tikz, tikz-cd, animate}
+\usetikzlibrary{arrows,shapes,backgrounds,trees}
+\usetikzlibrary{decorations.pathreplacing}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{wrapfig}
+\usepackage{booktabs}
+\usepackage{dcolumn}
+\usepackage[sectionbib]{apacite}
+\renewcommand{\bibliographytypesize}{\footnotesize}
+\title{Event History Analysis in R}
+\subtitle{Day 2: Multivariate Analyses}
+\author{Constantin Manuel Bosancianu}
+\institute{Doctoral School of Political Science \\ Central European University, Budapest \\ \href{mailto:bosancianu@icloud.com}{bosancianu@icloud.com}}
+\date{November 3, 2015}
+\begin{document}
+\maketitle
+
+<<r setup-main, echo=FALSE, include=FALSE>>=
+knitr::opts_chunk$set(
+	eval = TRUE,
+  echo = FALSE,
+	error = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	cache = FALSE,
+	comment = NA
+)
+
+library(pacman)
+p_load(tidyverse, readstata13, ggthemes, survival, simPH, lmtest)
+
+save_plots <- FALSE
+@
+
+
+\section{Introduction}
+
+
+
+\begin{frame}{Outline}
+Yesterday was more theoretical - basic concepts in survival analysis, and a few descriptive summaries of the data.\bigskip
+
+Today I'll try going for an ambitious target.\bigskip
+
+\begin{itemize}
+\item Cox Proportional Hazards (Cox PH) model
+\item Investigating the PH assumption
+\item Going past the PH assumption\footnote{Stratified Cox PH model and the extended Cox model.}
+\end{itemize}
+
+\end{frame}
+
+
+
+\begin{frame}{Reason}
+Why is Cox PH so important?\bigskip
+
+Without giving away too much of the ending, it should be said that it's the ``OLS model'' of survival analysis:\bigskip
+
+\begin{itemize}
+\item Simple in its mechanics
+\item Robust to slight violations in its assumptions (particularly the PH one)\footnote{There are a few other benefits, but it's best to leave them until we get to that section.}
+\item Much better than a logistic regression model, because it uses information on survival time as well
+\end{itemize}
+
+\end{frame}
+
+
+
+
+\section{Cox PH}
+
+\begin{frame}
+
+\begin{center}
+\huge Cox Proportional Hazards model
+\end{center}
+\end{frame}
+
+
+
+\begin{frame}{Cox PH model}
+So far, we've been able to compare survivor probabilities and hazard rates between distinct groups in our sample (e.g. men vs. women, countries from South America vs. everywhere else).\bigskip
+
+The Cox PH model is intended to provide additional controls when judging these relationships, since it can estimate hazard rates for groups in the sample, \textit{after adjusting for any number of categorical and continuous time-invariant predictors}.\bigskip
+
+Roughly speaking, the Cox PH model is to the log-rank test what OLS regression is to the t-test.
+\end{frame}
+
+
+
+\begin{frame}{Cox PH model}
+Let's use $X$ to denote a set (vector) of independent variables, $X_1$, $X_2$, \dots $X_k$.\bigskip
+
+The formula for the Cox PH model is
+
+\begin{equation}
+  \centering
+  h(t,X)=h_0(t) \times e^{\sum\limits_{i=1}^k\beta_i \times X_i}
+\end{equation}
+\bigskip
+
+The model estimates the hazard rate for an individual at time t, based on a ``baseline hazard function'', $h_0(t)$, and the values on the vector of independent variables.
+\end{frame}
+
+
+
+\begin{frame}{Cox PH model}
+Two interesting features of the model:
+
+\begin{itemize}
+\item $h_0(t)$ is a function that depends on time, but not on the $X$s
+\item $e^{\sum\limits_{i=1}^k\beta_i \times X_i}$ depends on the $X$s, but not on time\footnote{The $X$s for now are time-invariant variables, e.g. the continent location for a country. If you want to use time-variant variables as well, the PH assumption no longer holds (``extended'' Cox model).}
+\end{itemize}
+\bigskip
+
+If $X_1=X_2=\dots=X_k=0$, then $h(t,X)=h_0(t) \times e^0=h_0(t)$, which is why it's called the ``baseline function''.
+\end{frame}
+
+
+
+\begin{frame}{The baseline function}
+$h_0(t)$ is interesting in itself--it can take any functional form.
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+ \begin{axis}[smooth,
+    area style,
+    width=6cm, height=4cm,xmin=0,xmax=4.5,ymin=0,ymax=1.2,
+    no markers,
+    samples=50,
+    axis y line=left,
+    axis x line=bottom,
+    scale only axis,
+    ytick={0,0.2,0.4,0.6,0.8,1},
+    yticklabels={0,0.2,0.4,0.6,0.8,1},
+    ylabel={$h(t)$},
+    ylabel style={rotate=-90},
+    xtick={0,2,4.5},
+    xticklabels={0, t, $\infty$}
+  ]
+\addplot [const plot, no marks, thick, red] coordinates {(0,0.47) (4,0.47)};
+  \end{axis}
+\end{tikzpicture}
+\caption*{Constant hazard function}
+\end{figure}
+  
+\end{frame}
+
+
+
+
+\begin{frame}{The baseline function}
+  
+\begin{figure}
+\centering
+\begin{tikzpicture}
+ \begin{axis}[smooth,
+    area style,
+    width=6cm, height=4cm,xmin=0,xmax=4.5,ymin=0,ymax=20.2,
+    no markers,
+    samples=50,
+    axis y line=left,
+    axis x line=bottom,
+    scale only axis,
+    ytick={0,4,8,12,16,20},
+    yticklabels={0,4,8,12,16,20},
+    ylabel={$h(t)$},
+    ylabel style={rotate=-90},
+    xtick={0,1,2,3,4},
+    xticklabels={0,1,2,3,4}
+  ]
+\addplot[red, very thick]  {pow(2,x)} node[above, midway, xshift=-1cm] {};
+  \end{axis}
+\end{tikzpicture}
+\caption*{Weibull hazard function}
+\end{figure}
+
+Other functions are also possible, such as the decreasing Weibull, or the lognormal.
+\end{frame}
+
+
+
+\begin{frame}{The baseline function}
+Because of its ability to handle multiple forms for the baseline hazard function, the Cox PH model is a ``semiparametric'' model.\bigskip
+
+Other benefits (apart from those mentioned already):
+
+\begin{itemize}
+\item Due to its robustness, it's a ``safe'' choice \cite[p.~111]{Kleinbaum2012}
+\item The exponential part guarantees we never get negative predicted hazard rates, which are mathematically impossible
+\end{itemize}
+
+\end{frame}
+
+
+
+\subsection{Estimates}
+\begin{frame}{Estimates}
+No point in going into the estimation procedure which is a flavour of Maximum Likelihood (partial ML).\bigskip
+
+The estimates that you get from the model, though, are (indirectly) hazard ratios.\bigskip
+
+\begin{equation}
+\centering
+\widehat{HR}=\frac{\widehat{h}(t,X^{*})}{\widehat{h}(t,X^{\dagger})}
+\end{equation}
+
+Here, $X^{*}$ and $X^{\dagger}$ denote two sets of values on the explanatory variables for two observations.
+\end{frame}
+
+
+
+\begin{frame}{Estimates}
+Let's say that $X^{*}=1$ denotes a country from Latin America from my data set, while $X^{\dagger}=0$ refers to all other countries.\bigskip
+
+\begin{equation}
+  \centering
+  \widehat{HR}=\frac{\widehat{h}(t,X^{*})}{\widehat{h}(t,X^{\dagger})}=\frac{\cancel{\widehat{h}_0^{*}(t)} \times e^{\sum\limits_{i=1}^k\hat{\beta}_i \times X_i^{*}}}{\cancel{\widehat{h}_0^{\dagger}(t)} \times e^{\sum\limits_{i=1}^k\hat{\beta}_i \times X_i^{\dagger}}}
+\end{equation}
+
+Essentially, the Cox PH model needs the PH assumption for those hazard functions to cancel each other out. The baseline hazard is not even estimated.\footnote{Because of the PH assumption, $h_0^{*}=h_0^{\dagger} \times \theta$, where $\theta$ is a constant. The $\theta$ disappears as well when we take the logarithm of the quantity.}
+\end{frame}
+
+
+
+\begin{frame}{Estimates}
+
+\begin{equation}
+  \centering
+  \widehat{HR}=\frac{e^{\sum\limits_{i=1}^k\hat{\beta}_i \times X_i^{*}}}{e^{\sum\limits_{i=1}^k\hat{\beta}_i \times X_i^{\dagger}}}=e^{\sum\limits_{i=1}^{k}\hat{\beta}_i(X_i^{*} - X_i^{\dagger})}
+\end{equation}
+
+In my case, $X^{*}=1$ and  $X^{\dagger}=0$, which means the equation reduces to $\widehat{HR}=e^{\beta}$.\bigskip
+
+The coefficients we get from the model are the $\beta$s, but we can get to hazard ratios by computing $e^{\beta}$ and thus getting the hazard ratio.
+\end{frame}
+
+
+
+\begin{frame}{Hazard ratios}
+They are like ``odds ratios'' in logistic regression. A HR larger than one denotes a higher hazard rate for the first group than the second.\bigskip
+
+Suppose the coefficient in my model would have been 2. $\widehat{HR}$=\Sexpr{exp(2)}, which means drug users would be at a much higher risk of dying compared to non-users.\bigskip
+
+If $\beta>0$, the $HR>1$. If $\beta<0$, then $HR<1$.
+
+\end{frame}
+
+
+\subsection{Practical Cox PH}
+
+\begin{frame}[fragile]{Practical Cox PH}
+I won't use the same data as yesterday; it's a sexy topic, but I couldn't get any model to show something interesting \textit{and} statistically significant.\bigskip
+
+Today we'll rely on a data set \cite<from>{HosmerJr1999} comprised of 100 HIV infected persons, tracking their survival time.\bigskip
+
+<<ch-1, echo=TRUE, size="scriptsize">>=
+path <- "https://stats.idre.ucla.edu/stat/r/examples/asa/hmohiv.csv"
+hmohiv <- read.table(path, sep = ",", header = TRUE)
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Practical Cox PH}
+<<ch-2, echo=TRUE, size="scriptsize">>=
+hmohiv |>
+  glimpse()
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Practical Cox PH}
+
+<<ch-3, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+library(Zelig)
+z.out <- zelig(Surv(time, censor) ~ drug + age, 
+               model = "coxph", data = hmohiv)
+@
+\bigskip
+
+Unfortunately, the model does not work in \texttt{Zelig}, although it was available in previous versions (e.g. 3.5.x).\bigskip
+
+Keep following it, though, it's bound to appear again soon.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Practical Cox PH: \texttt{survival}}
+<<ch-4, echo=TRUE, size='tiny'>>=
+colnames(hmohiv)[5] <- "death" # the variable name was odd
+model.1 <- coxph(Surv(time, death) ~ drug + age, data = hmohiv)
+summary(model.1)
+@
+
+\texttt{Surv()} creates the \texttt{survival} object which is used as a response variable in the analysis.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Practical Cox PH: \texttt{survival}}
+Breaking down the results for the drug use dummy indicator.\bigskip
+
+\begin{itemize}
+\item \texttt{coef}=\Sexpr{summary(model.1)$coefficients[1, 1]} is the estimated coefficient (a logged hazard ratio) for the dummy indicator;
+\item \texttt{exp(coef)}=\Sexpr{summary(model.1)$coefficients[1, 2]} is the hazard ratio for the variable;
+\item \texttt{se(coef)}=\Sexpr{summary(model.1)$coefficients[1, 3]} is the standard error for the \underline{coefficient};
+\item \texttt{z}=\Sexpr{summary(model.1)$coefficients[1, 4]} is the z value ($\frac{\beta}{SE}$);
+\item \texttt{Pr(>|z|)}=\Sexpr{summary(model.1)$coefficients[1, 5]} is the p value associated with the coefficient.
+\end{itemize}
+
+\end{frame}
+
+
+
+\begin{frame}{Practical Cox PH: \texttt{survival}}
+The output presents a range of other pieces of information.\bigskip
+
+\begin{itemize}
+\item Lower and upper CIs for the hazard ratio;
+\item LR test: compare the model with a null model (the baseline hazard rate) in terms of fit;
+\item $R^2$ value for the model fit (a Nagelkerke type of $R^2$).
+\end{itemize}
+\bigskip
+Wald test is generally considered less reliable than the LR one.
+\end{frame}
+
+
+
+\begin{frame}{Model fit: \texttt{concordance}}
+\texttt{Concordance} is a specific measure for the Cox PH model.\bigskip
+
+It denotes the percentage of pairs (A,B) of observations where the hazard of A is greater than that of B, and A gets the event before B.\bigskip
+
+It isn't very accurate through: it doesn't indicate \textit{by how much sooner} A gets the event faster than B.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+We could also obtain expected hazard ratios, with the \texttt{predict()} function.\bigskip
+
+<<ch-5, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+predict(model.1, type = "risk", se.fit = TRUE) # hazard ratio
+predict(model.1, type = "lp", se.fit = TRUE) # linear predictor
+predict(model.1, type = "expected", se.fit = TRUE)
+# expected number of events
+@
+
+The linear predictor is the $\sum\limits_{i=1}^{i}\beta_{i}X_{i}$ quantity. Predictions of the ``expected'' type incorporate the baseline hazard rate as well.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+We can also plot expected survival rates for particular ``types'' of individual in the data.\bigskip
+
+<<ch-6>>=
+# Both functions created by Ramon Saccilotto, Basel Institute for
+# Clinical Epidemiology and Biostatistics.
+createSurvivalFrame <- function(f.survfit){
+# initialise frame variable
+f.frame <- NULL
+# check if more then one strata
+if(length(names(f.survfit$strata)) == 0){
+# create data.frame with data from survfit
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower)
+# create first two rows (start at 1)
+f.start <- data.frame(time=c(0, f.frame$time[1]), n.risk=c(f.survfit$n, f.survfit$n), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1))
+# add first row to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start)
+}
+else {
+# create vector for strata identification
+f.strata <- NULL
+for(f.i in 1:length(f.survfit$strata)){
+# add vector for one strata according to number of rows of strata
+f.strata <- c(f.strata, rep(names(f.survfit$strata)[f.i], f.survfit$strata[f.i]))
+}
+# create data.frame with data from survfit (create column for strata)
+f.frame <- data.frame(time=f.survfit$time, n.risk=f.survfit$n.risk, n.event=f.survfit$n.event, n.censor = f.survfit
+$n.censor, surv=f.survfit$surv, upper=f.survfit$upper, lower=f.survfit$lower, strata=factor(f.strata))
+# remove temporary data
+rm(f.strata)
+# create first two rows (start at 1) for each strata
+for(f.i in 1:length(f.survfit$strata)){
+# take only subset for this strata from data
+f.subset <- subset(f.frame, strata==names(f.survfit$strata)[f.i])
+# create first two rows (time: 0, time of first event)
+f.start <- data.frame(time=c(0, f.subset$time[1]), n.risk=rep(f.survfit[f.i]$n, 2), n.event=c(0,0),
+n.censor=c(0,0), surv=c(1,1), upper=c(1,1), lower=c(1,1), strata=rep(names(f.survfit$strata)[f.i],
+2))
+# add first two rows to dataset
+f.frame <- rbind(f.start, f.frame)
+# remove temporary data
+rm(f.start, f.subset)
+}
+# reorder data
+f.frame <- f.frame[order(f.frame$strata, f.frame$time), ]
+# rename row.names
+rownames(f.frame) <- NULL
+}
+# return frame
+return(f.frame)
+}
+
+
+# define custom function to draw kaplan-meier curve with ggplot
+qplot_survival <- function(f.frame, f.CI="default", f.shape=3){
+# use different plotting commands dependig whether or not strata's are given
+if("strata" %in% names(f.frame) == FALSE){
+# confidence intervals are drawn if not specified otherwise
+if(f.CI=="default" | f.CI==TRUE ){
+# create plot with 4 layers (first 3 layers only events, last layer only censored)
+# hint: censoring data for multiple censoring events at timepoint are overplotted
+# (unlike in plot.survfit in survival package)
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv", color="red") + geom_step(aes(x=time,
+y=upper), directions="hv", linetype=2, color="blue") + geom_step(aes(x=time,y=lower), direction="hv", linetype=2, color="blue") +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape, color="green")
+}
+else {
+# create plot without confidence intervals
+ggplot(data=f.frame) + geom_step(aes(x=time, y=surv), direction="hv", color="red") +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape, color="green")
+}
+}
+else {
+if(f.CI=="default" | f.CI==FALSE){
+# without CI
+ggplot(data=f.frame, aes(group=strata, colour=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv", color="red") + geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape, color="green")
+}
+else {
+# with CI (hint: use alpha for CI)
+ggplot(data=f.frame, aes(colour=strata, group=strata)) + geom_step(aes(x=time, y=surv),
+direction="hv",color="red") + geom_step(aes(x=time, y=upper), directions="hv", linetype=2, alpha=0.5, color="blue") +
+geom_step(aes(x=time,y=lower), direction="hv", linetype=2, alpha=0.5, color="blue") +
+geom_point(data=subset(f.frame, n.censor==1), aes(x=time, y=surv), shape=f.shape, color="green")
+}
+}
+}
+@
+
+<<ch-7, eval=save_plots>>=
+df_test <- survfit(model.1, newdata = data.frame(drug = 1, age = 20))
+ObjSurv1 <- createSurvivalFrame(df_test)
+
+pdf(file = "../03-graphs/02-01.pdf",
+    height = 4, width = 6, bg = 'transparent')
+qplot_survival(ObjSurv1) + xlab("Time") + ylab("Survival") +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA),
+        panel.grid.major = element_line(color = "gray80"),
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(color = "gray80"),
+        axis.title.y = element_text(color = "gray80", angle = 90),
+        legend.text = element_text(color = "gray80"),
+        legend.title = element_text(color = "gray80"))
+dev.off()
+rm(df_test, ObjSurv1)
+
+# Comparison model
+df_test <- survfit(model.1, newdata = data.frame(drug = 1, age = 40))
+ObjSurv1 <- createSurvivalFrame(df_test)
+
+pdf(file = "../03-graphs/02-02.pdf",
+    height = 4, width = 6, bg = 'transparent')
+qplot_survival(ObjSurv1) + xlab("Time") + ylab("Survival") +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA),
+        panel.grid.major = element_line(color = "gray80"),
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(color = "gray80"),
+        axis.title.y = element_text(color = "gray80", angle = 90),
+        legend.text = element_text(color = "gray80"),
+        legend.title = element_text(color = "gray80"))
+dev.off()
+rm(df_test, ObjSurv1)
+@
+
+<<ch-8, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+plot(survfit(model.1, newdata = data.frame(drug = 1, age = 50)),
+     xlab = "Time", ylab = "Survival")
+@
+
+\begin{figure}
+\centering
+\includegraphics[width=0.45\textwidth]{../03-graphs/02-01}
+\includegraphics[width=0.45\textwidth]{../03-graphs/02-02}
+\caption*{Left: \texttt{age}=20. Right: \texttt{age}=40. Comparison for drug users.}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+An alternative is the \texttt{simPH} package, which essentially fills the gap which \texttt{Zelig} left.\bigskip
+
+<<ch-9, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+library(simPH)
+hmohiv <- hmohiv |> mutate(cent_age = age - mean(age, na.rm = TRUE))
+model.2 <- coxph(Surv(time, death) ~ drug + cent_age, data = hmohiv)
+sim.2 <- coxsimLinear(model.2, b = "cent_age", Xj = seq(-10, 8, by = 0.25),
+                      nsim = 250)
+# The smaller the "by=" interval, the smoother the graph
+simGG(sim.2, xlab = "Centered age", type = "lines")
+@
+
+<<ch-10, eval=save_plots, size='scriptsize'>>=
+hmohiv <- hmohiv |> mutate(cent_age = age - mean(age, na.rm = TRUE))
+model.2 <- coxph(Surv(time, death) ~ drug + cent_age, data = hmohiv)
+sim.2 <- coxsimLinear(model.2, b = "cent_age", Xj = seq(-10, 5, by = 0.25),
+                      nsim = 150)
+
+# This is a ggplot2 object, so we can flexibly manipulate it
+graph1 <- simGG(sim.2, xlab = "Centered age", type = "lines")
+pdf(file = "../03-graphs/02-03.pdf",
+    height = 4, width = 6, bg = 'transparent')
+graph1 +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA),
+        panel.grid.major = element_line(color = "gray80"),
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(color = "gray80"),
+        axis.title.y = element_text(color = "gray80", angle = 90),
+        legend.text = element_text(color = "gray80"),
+        legend.title = element_text(color = "gray80"))
+dev.off()
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.75\textwidth]{../03-graphs/02-03}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+
+<<ch-11, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+sim.3 <- coxsimLinear(model.2, b = "drug", Xj = 0:1,
+                      nsim = 250)
+graph2 <- simGG(sim.3, xlab = "Drug use", type = "lines", method = "lm")
+graph2 + scale_x_continuous(limits = c(0, 1),
+    breaks = c(0, 1), labels = c("No drug use", "Drug use"))
+@
+
+<<ch-12, eval=save_plots>>=
+sim.3 <- coxsimLinear(model.2, b = "drug", Xj = 0:1,
+                      nsim = 150)
+graph2 <- simGG(sim.3, xlab = "Drug use", type = "lines", method = "lm")
+
+pdf(file = "../03-graphs/02-04.pdf",
+    height = 4, width = 6, bg = 'transparent')
+graph2 +
+  scale_x_continuous(limits = c(0, 1), breaks = c(0, 1),
+                     labels = c("No drug use", "Drug use")) +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA),
+        panel.grid.major = element_line(color = "gray80"),
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(color = "gray80"),
+        axis.title.y = element_text(color = "gray80", angle = 90),
+        legend.text = element_text(color = "gray80"),
+        legend.title = element_text(color = "gray80"))
+dev.off()
+rm(model.1)
+@
+
+The option \texttt{method=``lm''} is needed to make sure that the lines are straight, and don't get smoothed.\bigskip
+
+The \texttt{simGG()} function produces a \texttt{ggplot2} object, so we can modify a lot of things about it.\footnote{Remember the cool graph themes available in the \texttt{ggthemes} package.}
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Cox PH: predictions}
+We can obtain similar predictions for dichotomous variables.\bigskip
+
+\begin{figure}
+\centering
+\includegraphics[width=0.65\textwidth]{../03-graphs/02-04}
+\end{figure}
+\end{frame}
+
+
+
+\section{The PH assumption}
+
+\begin{frame}
+
+\begin{center}
+\huge Assessing the PH assumption
+\end{center}
+\end{frame}
+
+
+
+\begin{frame}{PH assumption}
+The assumption can be checked, to see if the Cox PH model is appropriate under the circumstances.\bigskip
+
+Three ways of checking:
+\begin{itemize}
+\item Graphically (through log--log curves)
+\item Through a goodness-of-fit (GOF) test
+\item Relying on time-dependent variables
+\end{itemize}
+\end{frame}
+
+
+
+\subsection{Graphical checks}
+\begin{frame}{PH check: graphical}
+What we want to see is parallel log--log curves: $ln(-ln(\widehat{S}))$.\bigskip
+
+$\widehat{S} \in (0;1)$, which means $-ln(\widehat{S}) \in (0;\infty)$, which means $ln(-ln(\widehat{S})) \in (-\infty; \infty)$.\bigskip
+
+We have a hazard function from the Cox model, which we can convert to a survival function through some mathematical trasformations.
+\end{frame}
+
+
+\begin{frame}{PH check: graphical}
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+ \begin{axis}[smooth,
+    area style,
+    width=7cm, height=4cm,xmin=0,xmax=5,ymin=0,ymax=1.2,
+    no markers,
+    samples=50,
+    axis y line=left,
+    axis x line=bottom,
+    scale only axis,
+    ytick={0,1},
+%    ylabel={$S(t)$},
+%    ylabel style={rotate=-90},
+    xlabel={$t$}
+  ]
+\addplot [const plot, no marks, very thick] coordinates {(0,1) (1,1) (1,0.85) (2,0.85) (2,0.65) (3,0.65) (3,0.35) (4,0.35) (4, 0.15) (4.7,0.15)} node[right,pos=0.38,fore] {Group 1};
+\addplot [const plot, no marks, very thick, dashed] coordinates {(0,1) (0.5,1) (0.5,0.65) (1,0.65) (1,0.45) (2,0.45) (2,0.25) (3,0.25) (3, 0.05) (3.7,0.05)} node[below,pos=0.34,fore] {Group 2};
+  \end{axis}
+\end{tikzpicture}
+\caption*{Roughly parallel lines mean the PH assumption is met}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}{PH check: graphical}
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+ \begin{axis}[smooth,
+    area style,
+    width=7cm, height=4cm,xmin=0,xmax=5,ymin=0,ymax=1.2,
+    no markers,
+    samples=50,
+    axis y line=left,
+    axis x line=bottom,
+    scale only axis,
+    ytick={0,1},
+%    ylabel={$S(t)$},
+%    ylabel style={rotate=-90}.
+    xlabel={$t$}
+  ]
+\addplot [const plot, no marks, very thick] coordinates {(0,1) (1,1) (1,0.85) (2,0.85) (2,0.65) (3,0.65) (3,0.35) (4,0.35) (4, 0.15) (4.7,0.15)} node[right,pos=0.38,fore] {Group 1};
+\addplot [const plot, no marks, very thick, dashed] coordinates {(0,1) (0.5,1) (0.5,0.65) (1.5,0.65) (1.5,0.55) (2.5,0.55) (3.5,0.55) (4,0.45) (4, 0.35) (4.5,0.35) (4.5, 0.25) (4.7,0.25)} node[below,pos=0.34, xshift=-0.2cm, yshift=-0.3cm, fore] {Group 2};
+  \end{axis}
+\end{tikzpicture}
+\caption*{Crossing, converging or diverging lines mean the PH assumption is not met}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{PH check: graphical}
+Done for Kaplan-Meier survival estimates, one variable at a time.\bigskip
+
+<<ch-13, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+# This is not a Cox PH model
+model.1 <- survfit(Surv(time, death) ~ drug, data = hmohiv)
+plot(model.1, fun = "cloglog", lty = c("solid", "dashed"), 
+     col = c("red", "blue"), xlab = "Time in log scale",
+     ylab = "log-log survival")
+@
+
+<<ch-14, eval=save_plots>>=
+pdf(file = "../03-graphs/02-05.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(model.1, fun = "cloglog",
+     lty = c("solid", "dashed"), 
+     col = c("red", "blue"))
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time in log scale", side = 1, col = "white", line = 2)
+mtext("log-log survival", side = 2, col = "white", line = 2)
+dev.off()
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{PH check: graphical}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.7\textwidth]{../03-graphs/02-05.pdf}
+\caption*{The PH assumption appears to be satisfied with respect to drug use}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{PH check: graphical}
+We can follow the same strategy with respect to continuous variables, but we have to split them into $k$ categories.\bigskip
+
+<<ch-15, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+quantile(hmohiv$age, c(0.33, 0.66)) # find ages at those precise
+# locations in the age distribution
+hmohiv$agecat[hmohiv$age <= 32] <- 0
+hmohiv$agecat[hmohiv$age >= 33 & hmohiv$age <= 38] <- 1
+hmohiv$agecat[hmohiv$age >= 39] <- 2
+model.1 <- survfit(Surv(time, death) ~ agecat, data = hmohiv)
+plot(model.1, fun = "cloglog", lty = c("solid", "dashed", "dotted"), 
+     col = c("red", "blue", "green"), xlab = "Time in log scale",
+     ylab = "log-log survival")
+@
+
+<<ch-16, eval=save_plots>>=
+quantile(hmohiv$age, c(0.33, 0.66)) # find ages at those precise
+# locations in the age distribution
+hmohiv$agecat[hmohiv$age <= 32] <- 0
+hmohiv$agecat[hmohiv$age >= 33 & hmohiv$age <= 38] <- 1
+hmohiv$agecat[hmohiv$age >= 39] <- 2
+model.1 <- survfit(Surv(time, death) ~ agecat, data = hmohiv)
+
+pdf(file = "../03-graphs/02-06.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(model.1, fun = "cloglog",
+     lty = c("solid", "dashed", "dotted"), 
+     col = c("red", "blue", "green"))
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time in log scale", side = 1, col = "white", line = 2)
+mtext("log-log survival", side = 2, col = "white", line = 2)
+dev.off()
+@
+
+It's good to choose a manageable number of categories, e.g. 2 or 3.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{PH check: graphical}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.7\textwidth]{../03-graphs/02-06.pdf}
+\caption*{The PH assumption appears to be satisfied with respect to age too}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Graphical checks: problems}
+The graphical check approach has a few inherent problems \cite[pp.~172--174]{Kleinbaum2012}:\bigskip
+
+\begin{itemize}
+\item Deciding whether lines are parallel is a subjective decision
+\item Deciding how to split variables into groups is also subjective
+\item Difficult strategy with reduced samples (some groups could be very small)
+\end{itemize}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{PH check: graphical}
+A second graphical approach is to plot expected vs. observed survival curves.\bigskip
+
+First stage involves running a Cox PH model and obtaining expected curves based on the values of the predictor.\bigskip
+
+The second stage is to obtain Kaplan--Meier curves as we did above.\bigskip
+
+We then plot the two sets of curves and inspect how closely they overlap.
+\end{frame}
+
+
+
+\subsection{GOF approach}
+\begin{frame}{GOF checks}
+They are appealing, because they provide a single digit, with an associated \textit{p} value, on the basis of which to make a decision.\bigskip
+
+Based on Schoenfeld residuals, which is computed for each observation which experiences an event, for each of the DVs in the model.\bigskip
+
+Residuals are computed as $X_i - weighted(X_{\sim i})$, where $X_i$ is observation's $i$ value on the $X$ variable, $X_{\sim i}$ are the values for all other observations, and the weights are those observations' hazard rates.
+\end{frame}
+
+
+
+\begin{frame}{GOF checks: procedure}
+Three-stage procedure:\bigskip
+
+\begin{itemize}
+\item Compute Schoenfeld residuals for each observation
+\item Construct a variable that orders survival times, from lowest to highest
+\item Correlate this variable with the residuals
+\end{itemize}
+\bigskip
+
+If PH assumption is valid, there should be no correlation observed.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{GOF checks: procedure}
+R does all of this for you automatically, with a slight twist: it uses scaled Schoenfeld residuals.\footnote{In the vast majority of cases, the results should be the same. The scaling procedure involves adjusting the residuals by the covariance matrix of the residuals.} \bigskip
+
+<<ch-17, echo=TRUE, size='scriptsize'>>=
+model.1 <- coxph(Surv(time, death) ~ drug + age, data = hmohiv)
+cox.zph(model.1, transform = "km", global = FALSE)
+# The "global" option does a global chi-square test
+# in addition to one for each variable.
+@
+
+We want to see low correlations ($\rho$), and $p$ values above 0.05.
+\end{frame}
+
+
+\subsection{Time-dependent}
+\begin{frame}{Time-dependent checks}
+The procedure involves using a function of time, and interacting this with the predictors.\bigskip
+
+If the PH assumption is valid, the coefficient on the interaction should not be statistically significant.\bigskip
+
+\begin{equation}
+  \centering
+  h(t,X)=h_0(t) \times e^{\beta X + \delta (X \times g(t))}
+\end{equation}
+
+$g(t)=t$, or $g(t)=log(t)$, or many others.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Time-dependent checks: \texttt{R}}
+<<ch-18, echo=TRUE,size='scriptsize'>>=
+model.2 <- coxph(Surv(time, death) ~ drug + age + tt(drug), data = hmohiv,
+                 tt=function(x, t, ...) x * t)
+@
+
+The function I chose here is simply $g(t)=t$.\bigskip
+
+The model has to be run with the \texttt{tt} argument. If you try computing by hand a $drug \times time$ interaction, the model will have convergence errors due to multicollinearity.
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Time-dependent checks: \texttt{R}}
+<<ch-19, echo=TRUE, size='tiny'>>=
+summary(model.2); rm(model.2)
+@
+
+\end{frame}
+
+
+
+\section{Stratified Cox model}
+
+\begin{frame}
+
+\begin{center}
+\huge Stratified Cox model
+\end{center}
+\end{frame}
+
+
+
+\begin{frame}{Stratification}
+An extension to the case when one of the variables is clearly shown not to abide by the PH assumption.\bigskip
+
+The solution essentially involves running models separately for each category of the variable--stratifying based on the variable.\bigskip
+
+Unfortunately, everything was pretty good with the previous model, so there's not much we can do there.
+\end{frame}
+
+
+
+\begin{frame}{Alternative data}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{l l l}
+\toprule
+Variable & Description & Values \\
+\midrule
+ID & Identification code & 1-628\\
+AGE & Age at enrollment & Years \\
+BECKTOTA & Beck depression score at admission & 0-54 \\
+HERCOC & Heroin/cocaine use during 3 & 1=both; 2=only heroin; \\
+       & months prior to admission   & 3=only cocaine; 4=neither \\
+IVHX & Drug use history at admission & 1=never; 2=previous; 3=recent \\
+NDRUGTX & No. of prior drug treatments & 0-40 \\
+RACE & Subject's race & 0=White; 1=other \\
+TREAT & Treatment randomization & 0=short; 1=long \\
+SITE & Treatment site & 0=A; 1=B \\
+LOT & Length of treatment & No. of days \\
+TIME & Time to return to drug use & No. of days\footnote{Measured starting from admission time.} \\
+CENSOR & Returned to drug use & 1=yes; 0=otherwise \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratification}
+<<ch-20, echo=TRUE, size='scriptsize'>>=
+df_uis <- read.table("../02-data/03-uissurv.dat", quote = "\"",
+                     comment.char = "")
+df_uis <- df_uis |>
+  rename(id = 1, age = 2, becktota = 3, hercoc = 4, ivhx = 5,
+         ndrugtx = 6, race = 7, treat = 8, site = 9, lot = 10,
+         time = 11, censor = 12) |>
+  mutate(becktota = if_else(becktota == ".", NA_character_, becktota),
+         hercoc = if_else(hercoc == ".", NA_character_, hercoc),
+         ivhx = if_else(ivhx == ".", NA_character_, ivhx),
+         race = if_else(race == ".", NA_character_, race),
+         age = if_else(age == ".", NA_character_, age)) |>
+  mutate_at(.vars = vars(becktota, hercoc, ivhx, race, age),
+            .funs = as.numeric)
+model.3 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat +
+                   site + lot, data = df_uis, na.action = na.omit)
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratification}
+<<ch-22, size='tiny'>>=
+summary(model.3)
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratification}
+<<ch-23, echo=TRUE, size='scriptsize'>>=
+cox.zph(model.3, transform = "km", global = FALSE)
+@
+
+We clearly have a problem here with the \texttt{length of treatment} variable.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox}
+The model is a simple variation on the standard Cox model.\bigskip
+
+\begin{equation}
+\centering
+h_g(t,X) = {h_0}_g(t) \times e^{\sum\limits_{i=1}^{k}\beta_iX_i}
+\end{equation}
+
+Here \texttt{g} designates the strata. We have separate baseline hazards for the different categories (strata).
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox: practical}
+A simple extension of the \texttt{R} code as well.\bigskip
+
+<<ch-24, echo=TRUE, size='scriptsize'>>=
+quantile(df_uis$lot, c(0.33, 0.66)) # examine cutoff points
+df_uis$lotcat[df_uis$lot < 55] <- 0
+df_uis$lotcat[df_uis$lot >= 55 & df_uis$lot <= 94] <- 1
+df_uis$lotcat[df_uis$lot > 94] <- 2
+model.4 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat +
+                   site + strata(lotcat), data = df_uis, na.action = na.omit)
+@
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox: practical}
+<<ch-25, size='tiny'>>=
+summary(model.4)
+@
+
+\end{frame}
+
+
+\begin{frame}[fragile]{Stratified Cox: practical}
+Each stratum will have the same coefficients on the $\beta$s, but their baseline hazard rates are probably different. \bigskip
+
+<<ch-26, eval=FALSE, echo=TRUE, size='tiny'>>=
+plot(survfit(model.4))
+@
+
+<<ch-27, eval=save_plots>>=
+pdf(file = "../03-graphs/02-07.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(survfit(model.4), lty = c("solid", "dashed", "dotted"),
+     col = c("red", "blue", "green"))
+legend(900, .9, c("low", "medium", "high"), lty = 1:3,
+       col = c("red", "blue", "green"), cex = 0.8, border = "white",
+       text.col = "white", bg = "transparent")
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time", side = 1, col = "white", line = 2)
+mtext("Survival", side = 2, col = "white", line = 2)
+dev.off()
+@
+
+\begin{figure}
+\centering
+\includegraphics[width=0.6\textwidth]{../03-graphs/02-07.pdf}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox: practical}
+The ``un-stratified'' model will make no such distinction between basic hazard rates.\bigskip
+
+<<ch-28, eval=FALSE, echo=TRUE, size='tiny'>>=
+plot(survfit(model.3))
+@
+
+<<ch-29, eval=save_plots>>=
+pdf(file = "../03-graphs/02-08.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(survfit(model.3), col = "red")
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time", side = 1, col = "white", line = 2)
+mtext("Survival", side = 2, col = "white", line = 2)
+dev.off()
+@
+
+\begin{figure}
+\centering
+\includegraphics[width=0.6\textwidth]{../03-graphs/02-08.pdf}
+\end{figure}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox}
+With multiple variables, they are added in the same \texttt{strata} field, e.g. \texttt{strata(IV1+IV2+...)}.\bigskip
+
+R will create categories based on them, e.g. 2 categories for \texttt{IV1} and 3 for \texttt{IV2} $\Rightarrow$ 6 categories.\bigskip
+
+\underline{Assumption}: there is no interaction between strata and the estimated parameters: ${\beta_1}_{(1)}={\beta_1}_{(2)}={\beta_1}_{(3)}={\beta_1}_{(4)}=\dots$
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox}
+It's safe to test the assumption, with a series of interactions.\bigskip
+
+<<ch-30, echo=TRUE, size='scriptsize'>>=
+rm(model.3, model.4)
+# Recode the LoT variable into only two categories, for convenience
+quantile(df_uis$lot, 0.5) # median is 84
+df_uis <- df_uis |> mutate(lotcat = if_else(lot < 84, 0, 1))
+# Model with stratification
+model.4.1 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat +
+                     site + strata(lotcat), data = df_uis, na.action = na.omit)
+# Model with interactions
+model.4.2 <- coxph(Surv(time, censor) ~ age + becktota + ivhx + treat +
+                     site + age * lotcat + becktota * lotcat + ivhx * lotcat +
+                     treat * lotcat + site * lotcat, data = df_uis,
+                   na.action = na.omit)
+@
+\end{frame}
+
+
+\begin{frame}[fragile]{Stratified Cox}
+<<ch-31, echo=TRUE, size='scriptsize'>>=
+round(summary(model.4.1)$coefficients,
+      digits = 3)
+@
+\end{frame}
+
+
+\begin{frame}[fragile]{Stratified Cox}
+<<ch-32, echo=TRUE, size='scriptsize'>>=
+round(summary(model.4.2)$coefficients,
+      digits = 3)
+@
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Stratified Cox}
+Likelihood ratio (LR) test: $-2*LL_{M2} - (-2*LL_{M1})$ is distributed $\chi^2$, with $k_{M2} - k_{M1}$ degrees of freedom, where $k$ is the number of predictors of the models.\bigskip
+
+<<ch-33, echo=TRUE, size='scriptsize'>>=
+lrtest(model.4.1, model.4.2)
+@
+
+The coefficients do vary between strata.
+\end{frame}
+
+
+
+\section{Extended Cox model}
+
+
+\begin{frame}
+
+\begin{center}
+\huge Extended Cox model
+\end{center}
+\end{frame}
+
+
+\begin{frame}{Extended Cox}
+We can partition the vector of coefficients into two:
+
+\begin{itemize}
+\item $X^{*}$ which only contains time-invariant variables: $X_1$, $X_2$, \dots $X_k$
+\item $X^{\dagger}$ which only contains time-variant variables: $X_1(t)$, $X_2(t)$, \dots $X_j(t)$
+\end{itemize}
+
+\begin{equation}
+\centering
+h(t, X(t)) = h_0(t) \times e^{\sum\limits_{i=1}^{k} \beta X_i^{*} + \sum\limits_{i=1}^{j} \delta X_i^{\dagger}(t)}
+\end{equation}
+
+Even though $X_i^{\dagger}$ is time-variant, the estimated $\delta$ is the same for all time periods.
+\end{frame}
+
+
+
+\begin{frame}{\texttt{heart} data}
+
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{l l l}
+\toprule
+Variable & Description & Values \\
+\midrule
+START & Time at which program was entered & - \\
+STOP & Time when program was exited & - \\
+EVENT & Death status & 1=dead; 0=censored; \\
+AGE & Age at acceptance into program & Years - 48 \\
+YEAR & Year of acceptance & Year - Nov 1, 1967 \\
+SURGERY & Previous surgery & 1=yes; 0=no \\
+TRANSPLANT & If ind. had transplant & 1=yes; 2=no \\
+\bottomrule
+\end{tabular}
+\caption*{Stanford Heart Transplant Study (1967-1974, N=103)}
+\end{table}
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+69 (67\%) patients received a transplant and 75 (73\%) patients died (45 recipients of new hearts and 30 non-recipients).\bigskip
+
+There is a problem, though: people who died sooner never got the chance to get a transplant, since it takes time to find a donor.\bigskip
+
+This might make transplants appear overly effective.
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+The \texttt{heart} data is available in the \texttt{survival} package.\bigskip
+
+<<ch-34, echo=TRUE, size='scriptsize'>>=
+data(heart)
+heart |> glimpse()
+@
+
+We don't have a time variable, but \texttt{Surv()} can handle a beginning and end indicator, which we have in the data.
+\end{frame}
+
+
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+We don't have to worry about clustering at the level of individual; the software knows what observation to pick for inclusion in the likelihood function.\bigskip
+
+This is a new way of arranging the data, but it's the only way \texttt{survival} knows how to handle time-varying predictors.\bigskip
+
+<<ch-35, echo=TRUE, size='scriptsize'>>=
+model.5 <- coxph(Surv(start, stop, event) ~ transplant + surgery + age + year,
+                 data = heart)
+@
+\end{frame}
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+<<ch-36, size='tiny'>>=
+summary(model.5)
+@
+
+\end{frame}
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+<<ch-37, eval=FALSE, echo=TRUE, size='scriptsize'>>=
+# Respondents of 38 years old, with no transplant
+plot(survfit(model.5, newdata = data.frame(transplant = 0, age = -10,
+                                           surgery = 0, year = 0)),
+     xlab = "Time", ylab = "Survival")
+# Respondents of 68 years old, with no transplant
+plot(survfit(model.5, newdata = data.frame(transplant = 0, age = 20,
+                                           surgery = 0, year = 0)),
+     xlab = "Time", ylab = "Survival")
+@
+
+Respondents are similar in other respects: no past experience of surgery, and admitted to the program in November 1967.
+
+<<ch-38, eval=save_plots>>=
+pdf(file = "../03-graphs/02-09.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(survfit(model.5, newdata = data.frame(transplant = 0, age = -10,
+                                           surgery = 0, year = 0)),
+     col = "white")
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time", side = 1, col = "white", line = 2)
+mtext("Survival", side = 2, col = "white", line = 2)
+dev.off()
+
+pdf(file = "../03-graphs/02-10.pdf",
+    height = 4, width = 6, bg = 'transparent')
+plot(survfit(model.5, newdata = data.frame(transplant = 0, age = 20,
+                                           surgery = 0, year = 0)),
+     col =  "white")
+box(col = "white")
+axis(col.ticks = "white", side = 1, col = "white", col.axis = "white",
+     col.lab = "white")
+axis(col.ticks = "white", side = 2, col = "white", col.axis = "white",
+     col.lab = "white")
+mtext("Time", side = 1, col = "white", line = 2)
+mtext("Survival", side = 2, col = "white", line = 2)
+dev.off()
+@
+
+\end{frame}
+
+
+
+\begin{frame}[fragile]{Extended Cox: practical}
+
+\begin{figure}
+\centering
+\includegraphics[width=0.4\textwidth]{../03-graphs/02-09.pdf}
+\includegraphics[width=0.4\textwidth]{../03-graphs/02-10.pdf}
+\caption*{Left: \texttt{age}=38. Right: \texttt{age}=68.}
+\end{figure}
+
+Clearly, older individuals have lower survival rates.
+\end{frame}
+
+
+
+\section{Conclusion}
+
+\begin{frame}{Concluding remarks}
+The Cox PH model is quite a good choice for the initial steps in the analysis.\bigskip
+
+It's robust, can accomodate a range of situations (some not covered here), and is relatively simple to run.\bigskip
+
+Other more complex models await: accelerated failure time models (AFT), frailty models etc.
+\end{frame}
+
+
+\begin{frame}
+\begin{center}
+    \Huge Thank \textcolor{title}{you} for the kind attention!
+\end{center}
+\end{frame}
+
+\begin{frame}{References}
+\bibliographystyle{apacite}
+\bibliography{../Bibliography}
+\end{frame}
+
+\end{document}
